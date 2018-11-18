@@ -1,1 +1,1 @@
-Prototype is now LIVE: https://matt24smith.github.io/greenbox/
+Prototype is now LIVE: http://mattsmith-io.ddns.net/projects/greenbox/greenbox.html
