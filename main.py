@@ -7,10 +7,11 @@ matt smith
 from datetime import date as D
 from datetime import datetime as DT
 from datetime import timedelta
-from matplotlib.font_manager import FontProperties]
+from matplotlib.font_manager import FontProperties
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+plt.ioff()
 import matplotlib.dates as mdates
 import numpy as np
 import os
@@ -34,25 +35,23 @@ palette = ['xkcd:sea blue', 'xkcd:leaf green', '#efa00b',
            '#d65108', '#591f0a', '#F7F7F2']
 
 
-### some stuff ###
-plt.ioff()
 def timestamp(deltaHours=False): 
     if not deltaHours:
         return time.strftime("%Y-%m-%d %H:%M:%S") 
     else:
-        newtime = DT.now() + timedelta(hours=i)
+        newtime = DT.now() + timedelta(hours=deltaHours)
         return (newtime).strftime("%Y-%m-%d %H:%M:%S")
 
 
-### Webserv ###
 class Slave(threading.Thread):
+    ### Webserv ###
     def run(self):
         self.kill = False
         self.ready = False
         import http.server
-        Handler = http.server.SimpleHTTPRequestHandler
+        handler = http.server.SimpleHTTPRequestHandler
         try:
-            httpd = socketserver.TCPServer(('0.0.0.0', PORT), Handler)
+            httpd = socketserver.TCPServer(('0.0.0.0', PORT), handler)
         except OSError as e:
             print (e)
             print("%s\tCaught socket exception, retrying..." % timestamp())
@@ -67,9 +66,9 @@ class Slave(threading.Thread):
         return
 
 def json2js(sensor1):
-    jsonString = "jsonData = JSON.stringify(["
+    jsonString = "\njsonData = JSON.stringify(["
     jsonString += str(sensor1)
-    jsonString += "]);"
+    jsonString += "]);\n"
 
     return jsonString
 
@@ -111,7 +110,7 @@ def dbinsert(jdata, c):
         return False
 
 
-def graph(c, debug=False):
+def graph(c, debug=False, daterange=False):
     """
     [(0, 'time', 'datetime', 0, None, 0),
      (1, 'temp', 'float', 0, None, 0),
@@ -125,9 +124,18 @@ def graph(c, debug=False):
     font = FontProperties()
     font.set_family('monospace')
     
-    query = (r"SELECT * FROM sensor1 WHERE time BETWEEN "
-             + r"datetime('now', 'localtime', '-1 days') AND "
-             + r"datetime('now', 'localtime')")
+
+    if daterange is False:
+        query = (r"SELECT * FROM sensor1 WHERE time BETWEEN "
+                 + r"datetime('now', 'localtime', '-1 days') AND "
+                 + r"datetime('now', 'localtime')")
+    else:
+        query = (r"SELECT * FROM sensor1 WHERE time BETWEEN "
+                 + r"datetime('now', 'localtime', '" + str(daterange[0]) 
+                 +" days') AND "
+                 + r"datetime('now', 'localtime', '" + str(daterange[1])
+                 + " days')")
+
     c.execute(query)
     res = np.array(c.fetchall())
 
@@ -136,7 +144,6 @@ def graph(c, debug=False):
         return
 
     fig, axs = plt.subplots(4, 1, sharex=True, figsize=(8, 6))
-    #fig.patch.set_facecolor(palette[5])
     plt.suptitle("Sensor Data (24h)", fontproperties=font)
     plt.subplots_adjust(hspace=0.5, top=0.85, bottom=0.1)
     dates = [DT.strptime(t, "%Y-%m-%d %H:%M:%S") for t in res[:,0]]
@@ -150,10 +157,15 @@ def graph(c, debug=False):
     axs[0].legend()
     axs[1].set_title("Humidity (%)", fontproperties=font)
     axs[1].plot(dates, res[:, 2].astype(float), c=palette[0])
+    axs[1].fill_between(dates, res[:, 2].astype(float), alpha=0.2, color=palette[0])
     axs[2].set_title("Power of Hydrogen (pH)", fontproperties=font)
-    axs[2].plot(dates, res[:, 4].astype(float), c=palette[1])    
+    axs[2].plot(dates, res[:, 4].astype(float), c=palette[1])
+    axs[2].fill_between(dates, res[:, 4].astype(float), alpha=0.2, color=palette[1])
+    axs[2].set_ylim([4,8])
     axs[3].set_title("Conductivity (mS/cm)", fontproperties=font)
     axs[3].plot(dates, (res[:, 5].astype(float)), c=palette[2])
+    axs[3].fill_between(dates, res[:, 5].astype(float), alpha=0.2, color=palette[2])
+
     
     for ax in axs:
         ax.grid()
@@ -168,61 +180,58 @@ def graph(c, debug=False):
     else:
         plt.xlabel("Time (%s)" % today, fontproperties=font)
     fig.autofmt_xdate()
-    #plt.show()
-    #os.rename(graphfile, (graphfile[:-4]+".old.png"))
-    plt.savefig(graphfile, facecolor=palette[5], edgecolor="red")
-    plt.close()
     
-    writeJS(jsonfile)
-
+    if debug:
+        plt.show()
+    else:
+        print("%s Saving graph to %s" % (timestamp(), graphfile))
+        plt.savefig(graphfile, facecolor=palette[5], edgecolor="red")
+        plt.close()
+        writeJS(res, jsonfile)
+    
     return
 
 
-def writeJS(jsonfile):
-    #jsfile = r"/var/www/html/projects/greenbox/greenbox.js"
-    
+def writeJS(res, jsonfile):
     filetext = "var imgtag = \"<img src='graph.png?"
     filetext += str(int(time.time()))
     filetext += "' alt='Sensor Data (24h)'></img>\"\n"
-    filetext += "document.getElementById('graphImg').innerHTML=imgtag\n"
+    filetext += "document.getElementById('graphImg').innerHTML = imgtag\n"
+    
+    jsonStream = {x[0] : list(x[1:]) for x in res}
+    filetext += json2js(jsonStream)
     
     with open (jsonfile, "w") as f:
         f.write(filetext)
 
 
 ### main loop ###
-def update(c, conn, webslave=None):
-
+def update(c, conn, webslave=False):
+    sensor_sleeptime = 0
+    graph_sleeptime = 0
+    
 #    while(webslave.ready is False):
 #        print("%s\tWaiting for webslave..." % timestamp())
 #        time.sleep(10)
-    
-    loopcounter = 0
-    sensor_sleeptime = 0
-    graph_sleeptime = 0
 
     while (True):
-        jdata = read_sensor()
-        if jdata is False: continue
-            
-        with open(indexfile, 'w') as f:
-            f.write(json2js(jdata))
+#        jdata = read_sensor()
+#        if jdata is False: continue
 
-        dbinsert(jdata, c)
-    
-        loopcounter += 1
+#        if not (np.isnan(jdata["celsius"]) or np.isnan(jdata["humidity"])):
+#            c.execute("INSERT INTO sensor1 VALUES ('%s', %s, %s)"
+#                      % (timestamp(), jdata["celsius"], jdata["humidity"]))
+#        else:
+#            print("%s\tReceived garbage data from sensor" % timestamp())
 
         if sensor_sleeptime == graph_sleeptime:
             conn.commit()
-            graph(c)
+            graph(c, daterange=[-255, -254])
 
         t = time.time()
         sensor_sleeptime = SENSOR_UPDATE_INTERVAL - ((t % SENSOR_UPDATE_INTERVAL))
         graph_sleeptime = GRAPH_UPDATE_INTERVAL - ((t % GRAPH_UPDATE_INTERVAL))
         time.sleep(sensor_sleeptime)
-        
-        #questionable 
-        if sensor_sleeptime - .75 > 0: time.sleep(sensor_sleeptime - .75)
 
 
 
@@ -234,6 +243,7 @@ if __name__ == '__main__':
     c = conn.cursor()
 
     try:
+        print("Serving up some sweet sweet data...")
         update(c, conn)
     except KeyboardInterrupt as e:
         print("\n%s\tCTRL-C Detected. Closing threads..." % timestamp())
