@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
 
 """
 greenbox v0.2.0
@@ -30,9 +30,10 @@ SENSOR_UPDATE_INTERVAL = 60  # seconds
 GRAPH_UPDATE_INTERVAL = 900  # 900s = 15m
 sensor1ip = 'http://192.168.4.1:42000'
 jsonfile = r"/var/www/html/projects/greenbox/greenbox.js"
+phpfile = r"/var/www/html/projects/greenbox/graph.php"
 graphfile = r"/var/www/html/projects/greenbox/graph.png"
 palette = ['xkcd:sea blue', 'xkcd:leaf green', '#efa00b',
-           '#d65108', '#591f0a', '#F7F7F2']
+           '#d65108', '#591f0a', '#F7F7F7']
 
 
 def timestamp(deltaHours=False): 
@@ -123,8 +124,8 @@ def graph(c, debug=False, daterange=False):
 
     font = FontProperties()
     font.set_family('monospace')
+    black = (0.0471,0.0701,0.0471)  # rgb
     
-
     if daterange is False:
         query = (r"SELECT * FROM sensor1 WHERE time BETWEEN "
                  + r"datetime('now', 'localtime', '-1 days') AND "
@@ -144,28 +145,35 @@ def graph(c, debug=False, daterange=False):
         return
 
     fig, axs = plt.subplots(4, 1, sharex=True, figsize=(8, 6))
-    plt.suptitle("Sensor Data (24h)", fontproperties=font)
+    plt.suptitle("Sensor Data (24h)", y=1, fontproperties=font, fontsize=16, color=black)
     plt.subplots_adjust(hspace=0.5, top=0.85, bottom=0.1)
     dates = [DT.strptime(t, "%Y-%m-%d %H:%M:%S") for t in res[:,0]]
     hours = mdates.HourLocator(interval=2)
     mins = mdates.MinuteLocator(byminute=[0, 30])
     fmt = mdates.DateFormatter("%H:%M")
     
-    axs[0].set_title("Temperature (*C)", fontproperties=font)
-    axs[0].plot(dates, res[:, 1].astype(float), c=palette[3], label="Ambient")
-    axs[0].plot(dates, res[:, 6].astype(float), c=palette[0], label="Reservoir")
-    axs[0].legend()
-    axs[1].set_title("Humidity (%)", fontproperties=font)
+    axs[0].set_title("Temperature (*C)", fontproperties=font, color=black)
+    axs[0].plot(dates, res[:, 1].astype(float), c=palette[3], label="Ambient", zorder=5)
+    axs[0].fill_between(dates, res[:, 1].astype(float), alpha=0.5, color=palette[5], zorder=3)
+    axs[0].fill_between(dates, res[:, 1].astype(float), alpha=0.2, color=palette[3], zorder=4)
+    axs[0].plot(dates, res[:, 6].astype(float), c=palette[0], label="Reservoir", zorder=2)
+    axs[0].fill_between(dates, res[:, 6].astype(float), alpha=0.27, color=palette[0], zorder=1)
+    l = axs[0].legend()
+    for text in l.get_texts():
+        text.set_color("#0C120C")
+    axs[0].set_ylim(20, 27.5)
+    axs[1].set_title("Humidity (%)", fontproperties=font, color=black)
     axs[1].plot(dates, res[:, 2].astype(float), c=palette[0])
-    axs[1].fill_between(dates, res[:, 2].astype(float), alpha=0.2, color=palette[0])
-    axs[2].set_title("Power of Hydrogen (pH)", fontproperties=font)
+    axs[1].fill_between(dates, res[:, 2].astype(float), alpha=0.27, color=palette[0])
+    axs[1].set_ylim(15, 80)
+    axs[2].set_title("Power of Hydrogen (pH)", fontproperties=font, color=black)
     axs[2].plot(dates, res[:, 4].astype(float), c=palette[1])
-    axs[2].fill_between(dates, res[:, 4].astype(float), alpha=0.2, color=palette[1])
-    axs[2].set_ylim([4,8])
-    axs[3].set_title("Conductivity (mS/cm)", fontproperties=font)
+    axs[2].fill_between(dates, res[:, 4].astype(float), alpha=0.24, color=palette[1])
+    axs[2].set_ylim(4,8)
+    axs[3].set_title("Conductivity (mS/cm)", fontproperties=font, color=black)
     axs[3].plot(dates, (res[:, 5].astype(float)), c=palette[2])
     axs[3].fill_between(dates, res[:, 5].astype(float), alpha=0.2, color=palette[2])
-
+    axs[3].set_ylim(0, 2.25)
     
     for ax in axs:
         ax.grid()
@@ -173,19 +181,24 @@ def graph(c, debug=False, daterange=False):
         ax.xaxis.set_major_formatter(fmt)
         ax.xaxis.set_minor_locator(mins)
         ax.set_facecolor(palette[5])
+        ax.tick_params(color=black, labelcolor=black)
+        for spine in ax.spines.values():
+            spine.set_edgecolor(black)
 
-    today = D.strftime(D.today(), "%m-%d")
+    today = D.strftime(D.today(), "%b %d, %Y")
     if debug:
-        plt.xlabel("Time (%s debug=True)" % timestamp(), fontproperties=font)
+        plt.xlabel("Time (%s debug=True)" % 
+                   timestamp(), fontproperties=font, labelpad=20, color=black)
     else:
-        plt.xlabel("Time (%s)" % today, fontproperties=font)
+        plt.xlabel("Time (%s)" % 
+                   today, fontproperties=font, labelpad=20, color=black)
     fig.autofmt_xdate()
-    
+    fig.tight_layout(rect=[0, 0, 1, 0.94])
     if debug:
         plt.show()
     else:
-        print("%s Saving graph to %s" % (timestamp(), graphfile))
-        plt.savefig(graphfile, facecolor=palette[5], edgecolor="red")
+        print(timestamp() + " Saving fig to " + graphfile)
+        plt.savefig(graphfile, facecolor=palette[5], edgecolor="red", dpi=150)
         plt.close()
         writeJS(res, jsonfile)
     
@@ -193,15 +206,26 @@ def graph(c, debug=False, daterange=False):
 
 
 def writeJS(res, jsonfile):
-    filetext = "var imgtag = \"<img src='graph.png?"
-    filetext += str(int(time.time()))
-    filetext += "' alt='Sensor Data (24h)'></img>\"\n"
-    filetext += "document.getElementById('graphImg').innerHTML = imgtag\n"
+#    filetext = "var imgtag = \"<img src='projects/greenbox/graph.png?"
+#    filetext += str(int(time.time()))
+#    filetext += "' alt='Sensor Data (24h)'></img>\"\n"
+#    filetext += "document.getElementById('graphImg').innerHTML = imgtag\n"
     
     jsonStream = {x[0] : list(x[1:]) for x in res}
-    filetext += json2js(jsonStream)
+    filetext = json2js(jsonStream)
     
     with open (jsonfile, "w") as f:
+        f.write(filetext)
+        
+        
+def writePHP(phpfile):
+    filetext = "<!-- graph.png -->\n"
+    filetext += "<img src='projects/greenbox/graph.png?"
+    filetext += str(int(time.time()))
+    filetext += "' alt='Sensor Data (24h)'>\n"
+    filetext += "<!-- /graph.png -->\n"
+    
+    with open(phpfile, "w") as f:
         f.write(filetext)
 
 
@@ -226,7 +250,8 @@ def update(c, conn, webslave=False):
 
         if sensor_sleeptime == graph_sleeptime:
             conn.commit()
-            graph(c, daterange=[-255, -254])
+            graph(c, daterange=[-320, -319])
+            writePHP(phpfile)
 
         t = time.time()
         sensor_sleeptime = SENSOR_UPDATE_INTERVAL - ((t % SENSOR_UPDATE_INTERVAL))
